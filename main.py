@@ -11,52 +11,16 @@ LOGGER = logging.getLogger(__name__)
 
 
 def _project_root() -> str:
-    """
-    Возвращает корневую директорию проекта.
-
-    Returns
-    -------
-    str
-        Абсолютный путь к корню проекта.
-    """
-    # Русский комментарий: считаем корнем каталог, где лежит main.py
     return os.path.dirname(os.path.abspath(__file__))
 
 
 def _results_dir() -> str:
-    """
-    Возвращает путь к каталогу для сохранения результатов.
-
-    Returns
-    -------
-    str
-        Абсолютный путь к каталогу ``results``.
-    """
     return os.path.join(_project_root(), "results")
 
 
 def analyze_region(image_path: str, lat: float, lon: float) -> Dict[str, Any]:
     """
     Запускает полный конвейер анализа региона по спутниковому снимку.
-
-    Выполняет:
-    - детекцию зон пожара,
-    - оценку площади в гектарах и км²,
-    - сохранение визуализации и JSON-отчёта.
-
-    Parameters
-    ----------
-    image_path : str
-        Путь к изображению.
-    lat : float
-        Широта региона.
-    lon : float
-        Долгота региона.
-
-    Returns
-    -------
-    Dict[str, Any]
-        Структура с результатами анализа.
     """
     print("🚀 Запуск анализа региона по спутниковому изображению...")
     detector = WildfireDetector()
@@ -66,7 +30,7 @@ def analyze_region(image_path: str, lat: float, lon: float) -> Dict[str, Any]:
     except FileNotFoundError as exc:
         print(f"❌ Ошибка: не удалось прочитать изображение: {exc}")
         raise
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"❌ Неожиданная ошибка при детекции пожара: {exc}")
         raise
 
@@ -82,10 +46,9 @@ def analyze_region(image_path: str, lat: float, lon: float) -> Dict[str, Any]:
     vis_path = os.path.join(_results_dir(), f"wildfire_visualization_{ts}.png")
     try:
         from utils import ensure_directory
-
         ensure_directory(_results_dir())
         detector.visualize_results(img_rgb, fire_mask, enriched_detections, vis_path)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         LOGGER.error("Ошибка при построении визуализации: %s", exc)
         vis_path = ""
 
@@ -97,7 +60,7 @@ def analyze_region(image_path: str, lat: float, lon: float) -> Dict[str, Any]:
     }
 
     # Русский комментарий: выводим короткое резюме в консоль
-    print(f"🛰️ Анализ изображения: {image_path}")
+    print(f"\n🛰️  Анализ изображения: {image_path}")
     print(f"📍 Координаты: широта={lat:.4f}, долгота={lon:.4f}")
     print(f"🔥 Найдено очагов пожара: {len(enriched_detections)}")
     for idx, det in enumerate(enriched_detections, start=1):
@@ -111,7 +74,7 @@ def analyze_region(image_path: str, lat: float, lon: float) -> Dict[str, Any]:
     save_json(summary, report_path)
     print(f"📄 JSON-отчёт сохранён в: {report_path}")
     if vis_path:
-        print(f"🖼️ Визуализация сохранена в: {vis_path}")
+        print(f"🖼️  Визуализация сохранена в: {vis_path}")
 
     return summary
 
@@ -120,53 +83,59 @@ def run_demo() -> None:
     """
     Запускает демонстрационный сценарий.
 
-    Сначала пробует получить реальные данные из NASA FIRMS/GIBS,
-    а при отсутствии сети или ключей API переходит в полностью оффлайн-режим
-    с синтетическим изображением.
+    Перебирает несколько локаций и дат, пока не найдёт рабочий снимок.
+    Если NASA GIBS недоступен — переходит в оффлайн-режим с синтетикой.
     """
     print("🌍 Демонстрационный режим системы обнаружения лесных пожаров.")
-    print("🔎 Попытка получить реальные данные NASA (если доступно)...")
+    print("🔎 Поиск спутниковых снимков через NASA GIBS...\n")
 
-    lat: float = 51.0
-    lon: float = 73.0
-    image_path: str
+    # Русский комментарий: разные регионы с высокой вероятностью найти снимок
+    test_locations = [
+        {"name": "Австралия (Новый Южный Уэльс)", "lat": -33.8,  "lon": 151.0},
+        {"name": "Бразилия (Амазония)",            "lat": -3.0,   "lon": -60.0},
+        {"name": "Казахстан (Акмолинская обл.)",   "lat": 51.18,  "lon": 71.45},
+        {"name": "США (Калифорния)",                "lat": 36.7,   "lon": -119.4},
+        {"name": "Индонезия (Суматра)",             "lat": -0.5,   "lon": 101.5},
+    ]
 
-    # Русский комментарий: сначала пробуем реальный сценарий с данными NASA
-    try:
-        records = get_fire_data(country="KAZ", days=3)
-        if records:
-            first = records[0]
-            try:
-                lat = float(first.get("latitude", lat))
-                lon = float(first.get("longitude", lon))
-            except (TypeError, ValueError):
-                pass
+    # Русский комментарий: пробуем разные даты — от 2 до 10 дней назад
+    days_ago_options = [2, 4, 6, 8, 10]
 
-            image_path_candidate = get_sample_satellite_image(lat, lon)
-            if image_path_candidate and os.path.isfile(image_path_candidate):
-                image_path = image_path_candidate
-            else:
-                raise RuntimeError("Не удалось получить спутниковое изображение из GIBS.")
-        else:
-            raise RuntimeError("Данные FIRMS отсутствуют или недоступны.")
+    image_path = None
+    chosen_lat = 51.18
+    chosen_lon = 71.45
 
-        print("✅ Удалось получить реальные данные NASA, выполняется анализ...")
-    except Exception as exc:  # noqa: BLE001
-        print(
-            "⚠️ Не удалось использовать NASA FIRMS/GIBS "
-            f"(причина: {exc}). Переход в оффлайн-демо режим."
-        )
+    for location in test_locations:
+        lat = location["lat"]
+        lon = location["lon"]
+
+        for days_ago in days_ago_options:
+            print(f"📡 {location['name']} | {days_ago} дней назад ({lat}, {lon})")
+            candidate = get_sample_satellite_image(lat, lon, days_ago=days_ago)
+
+            if candidate and os.path.isfile(candidate):
+                image_path = candidate
+                chosen_lat = lat
+                chosen_lon = lon
+                print(f"✅ Найден снимок: {os.path.basename(candidate)}\n")
+                break
+
+        if image_path:
+            break
+
+    # Русский комментарий: если ни один онлайн-снимок не получен — синтетика
+    if not image_path:
+        print("\n🧪 NASA GIBS не вернул данные. Запускаем оффлайн-демо с синтетическим снимком.")
         image_path = create_synthetic_demo_image()
-        print(f"🧪 Синтетическое демо-изображение создано: {image_path}")
+        chosen_lat, chosen_lon = 51.18, 71.45
+        print(f"🖼️  Синтетическое изображение создано: {image_path}\n")
 
-    # Русский комментарий: запускаем анализ для выбранного изображения
     try:
-        analyze_region(image_path=image_path, lat=lat, lon=lon)
-    except Exception as exc:  # noqa: BLE001
+        analyze_region(image_path=image_path, lat=chosen_lat, lon=chosen_lon)
+    except Exception as exc:
         print(f"❌ Критическая ошибка при выполнении демо: {exc}")
 
 
 if __name__ == "__main__":
     setup_logging()
     run_demo()
-
