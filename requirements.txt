@@ -3,3 +3,4 @@ Pillow
 numpy
 matplotlib
 requests
+ultralytics
